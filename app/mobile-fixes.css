@@ -1,0 +1,6 @@
+@media (max-width: 700px) {
+  .day-tabs[data-slot] {
+    justify-content: flex-start;
+    overscroll-behavior-inline: contain;
+  }
+}
