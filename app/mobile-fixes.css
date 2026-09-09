@@ -4,3 +4,98 @@
     overscroll-behavior-inline: contain;
   }
 }
+
+.food-plan {
+  margin: 0 0 24px;
+  padding: 18px;
+  border: 1px solid #d9c7b7;
+  border-radius: 8px;
+  background: #fbf6ef;
+}
+
+.food-plan-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #7f462d;
+}
+
+.food-plan-title span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.food-plan-title svg { width: 18px; height: 18px; }
+.food-plan-title small { color: #7a7c70; }
+
+.food-stop {
+  display: grid;
+  grid-template-columns: 48px 1fr 16px;
+  gap: 10px;
+  padding: 12px 0;
+  color: inherit;
+  text-decoration: none;
+  border-top: 1px solid #e4d8cc;
+}
+
+.food-stop time { color: #9a5a3b; font-weight: 700; font-size: 13px; }
+.food-stop strong { display: block; font-size: 15px; }
+.food-stop p { margin: 4px 0; color: #62675d; font-size: 13px; line-height: 1.5; }
+.food-stop small { color: #9a5a3b; }
+.food-stop > svg { width: 15px; height: 15px; color: #9a5a3b; }
+.food-role { display: inline-block; margin-top: 4px; color: #9a5a3b; font-size: 12px; letter-spacing: .04em; }
+.food-alt { opacity: .76; }
+.food-alt .food-role { border: 1px dashed #b98a72; border-radius: 10px; padding: 1px 6px; }
+
+.trip-pin span.restaurant-pin,
+.legend-food,
+.legend-alt {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  color: white;
+  background: #b66740;
+  border: 2px solid #fff8ef;
+  box-shadow: 0 1px 5px rgba(70,38,20,.32);
+  font-size: 15px;
+}
+
+.trip-pin span.alternate-pin,
+.legend-alt {
+  background: #fff8ef;
+  border: 2px dashed #b66740;
+  box-shadow: none;
+}
+
+.map-caption .legend-attraction,
+.map-caption .legend-food,
+.map-caption .legend-alt {
+  width: 21px;
+  height: 21px;
+  vertical-align: middle;
+  font-size: 11px;
+}
+
+.map-caption .legend-attraction {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  color: white;
+  background: #657951;
+}
+
+.map-places .restaurant-place b { background: #b66740; }
+.map-places .alternate-place b { color: #9a5a3b; background: transparent; border: 1px dashed #b66740; }
+
+@media (max-width: 700px) {
+  .food-plan { padding: 14px; }
+  .food-plan-title { align-items: flex-start; flex-direction: column; }
+}
