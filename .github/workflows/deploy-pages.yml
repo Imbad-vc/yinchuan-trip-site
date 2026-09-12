@@ -16,7 +16,8 @@ concurrency:
 
 jobs:
   build:
-    environment: github-pages
+    # The AMap secrets are stored in this GitHub Environment.
+    environment: NEXT_PUBLIC_AMAP_KEY
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
