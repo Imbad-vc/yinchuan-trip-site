@@ -124,6 +124,7 @@
 }
 
 .map-caption .legend-attraction,
+.map-caption .legend-hotel,
 .map-caption .legend-food,
 .map-caption .legend-alt {
   width: 21px;
@@ -142,6 +143,7 @@
 }
 
 .map-places .restaurant-place b { background: #b66740; }
+.map-places .hotel-place b { color: #fff; background: #496c7a; }
 .map-places .alternate-place b { color: #9a5a3b; background: transparent; border: 1px dashed #b66740; }
 
 @media (max-width: 700px) {
