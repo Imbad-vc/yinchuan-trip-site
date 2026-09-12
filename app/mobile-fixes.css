@@ -51,6 +51,55 @@
 .food-alt { opacity: .76; }
 .food-alt .food-role { border: 1px dashed #b98a72; border-radius: 10px; padding: 1px 6px; }
 
+.transit-plan {
+  margin: 0 0 20px;
+  padding: 18px;
+  border: 1px solid #cfd8c6;
+  border-radius: 8px;
+  background: #f1f4eb;
+}
+
+.transit-plan-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  color: #526447;
+}
+
+.transit-plan-title span {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.transit-plan-title svg { width: 18px; height: 18px; }
+.transit-plan-title small { color: #747d6b; }
+.transit-list { display: grid; gap: 9px; }
+
+.transit-list article {
+  padding-top: 9px;
+  border-top: 1px solid #dce3d5;
+}
+
+.transit-list strong { font-size: 13px; font-weight: 600; }
+.transit-list p { margin-top: 3px; color: #687160; font-size: 12px; line-height: 1.65; }
+.transit-plan > .fine { margin-top: 12px; }
+
+.place-detail .place-transit {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 8px 10px;
+  color: #526447;
+  background: #e3e9da;
+  border-radius: 4px;
+}
+
+.place-transit svg { width: 14px; height: 14px; margin-top: 3px; flex-shrink: 0; }
+
 .trip-pin span.restaurant-pin,
 .legend-food,
 .legend-alt {
@@ -98,4 +147,42 @@
 @media (max-width: 700px) {
   .food-plan { padding: 14px; }
   .food-plan-title { align-items: flex-start; flex-direction: column; }
+  .transit-plan { padding: 14px; }
+  .transit-plan-title { align-items: flex-start; flex-direction: column; }
+}
+
+.plan-switch {
+  position: fixed;
+  right: 24px;
+  bottom: 22px;
+  z-index: 1100;
+  display: flex;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid #d5d9ce;
+  border-radius: 999px;
+  background: rgba(248,247,243,.94);
+  box-shadow: 0 8px 28px rgba(48,55,42,.14);
+  backdrop-filter: blur(12px);
+}
+
+.plan-switch a {
+  padding: 7px 12px;
+  border-radius: 999px;
+  color: #526047;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.plan-switch a:hover { background: #e8ecdf; }
+.three-trains { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.three-trains .train-time { align-items: flex-start; flex-direction: column; gap: 4px; }
+
+@media (max-width: 900px) {
+  .three-trains { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 700px) {
+  .plan-switch { right: 12px; bottom: 12px; }
+  .plan-switch a { padding: 6px 9px; }
 }

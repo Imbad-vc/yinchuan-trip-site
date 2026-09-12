@@ -1,5 +1,5 @@
 export type FoodStop={time:string;name:string;role:string;wait:string;place:string;note:string};
-export type TripDay={short:string;week:string;title:string;energy:string;transit:string;note:string;rhythm:string;route:string;tip:string;places:string[];food:FoodStop[];events:string[][]};
+export type TripDay={short:string;week:string;title:string;energy:string;transit:string;note:string;rhythm:string;route:string;tip:string;places:string[];food:FoodStop[];events:string[][];city?:string};
 
 export const days:TripDay[]=[
   {short:'抵达银川',week:'周四',title:'抵达，把步调放慢',energy:'轻松 · ★',transit:'动车约 6 小时 48 分',note:'今天只负责抵达。睡一觉，再用一顿宁夏菜开启假期。',rhythm:'抵达 → 休息 → 国强手抓',route:'银川站 → 金凤区酒店 → 国强手抓（贵宾楼店）',tip:'按 D1998 安排：04:50 起床、05:15 出发、05:35–05:45 到成都东。改乘晚班车则直接入住休息。',places:['station','base'],food:[
