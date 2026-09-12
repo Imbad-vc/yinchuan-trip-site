@@ -47,8 +47,10 @@ const amapSecurityCode=process.env.NEXT_PUBLIC_AMAP_SECURITY_CODE??'';
 
 type RouteMode='transit'|'walk'|'ride'|'drive';
 type RouteSummary={distance:string;duration:string;detail:string};
+type CachedRoute={summary:RouteSummary;path:[number,number][]};
 type WeatherInfo={weather:string;temperature:string;wind:string;forecast:string};
 type PoiInfo={address?:string;tel?:string;type?:string};
+type CacheRecord<T>={value:T;savedAt:number};
 
 function getAmap(){
   if(window.AMap)return Promise.resolve(window.AMap);
@@ -80,15 +82,29 @@ function wgs84ToGcj02(lng:number,lat:number):[number,number]{
 const formatDistance=(metres:number)=>metres>=1000?`${(metres/1000).toFixed(1)} km`:`${Math.round(metres)} m`;
 const formatDuration=(seconds:number)=>{const minutes=Math.max(1,Math.round(seconds/60));return minutes>=60?`${Math.floor(minutes/60)}小时${minutes%60?minutes%60+'分钟':''}`:`${minutes}分钟`};
 const loadPlugins=(AMap:any,names:string[])=>new Promise<void>(resolve=>AMap.plugin(names,resolve));
+const cacheKey=(kind:string,key:string)=>`yinchuan-trip:amap:${kind}:${key}`;
+const readCache=<T,>(key:string):CacheRecord<T>|null=>{try{const raw=localStorage.getItem(key);return raw?JSON.parse(raw):null}catch{return null}};
+const writeCache=<T,>(key:string,value:T)=>{try{localStorage.setItem(key,JSON.stringify({value,savedAt:Date.now()}))}catch{}};
+const cacheTime=(savedAt:number)=>new Date(savedAt).toLocaleString('zh-CN',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'});
+const pointArray=(value:any):[number,number][]=>Array.isArray(value)?value.flatMap((point:any)=>point&&typeof point.lng==='number'?[[point.lng,point.lat] as [number,number]]:Array.isArray(point)&&point.length>=2?[[Number(point[0]),Number(point[1])] as [number,number]]:[]):[];
+const routePath=(item:any):[number,number][]=>{
+  const direct=pointArray(item.path);if(direct.length)return direct;
+  return (item.steps??item.segments??[]).flatMap((step:any)=>[
+    ...pointArray(step.path),
+    ...(step.walking?.steps??[]).flatMap((part:any)=>pointArray(part.path)),
+    ...(step.transit?.lines??step.bus?.buslines??[]).flatMap((line:any)=>pointArray(line.path)),
+  ]);
+};
 
 export default function TripMap({day,itinerary=days,showTransit=itinerary!==days}:{day:number;itinerary?:TripDay[];showTransit?:boolean}){
-  const ref=useRef<HTMLDivElement>(null);const map=useRef<any>(null);const routeService=useRef<any>(null);const trafficLayer=useRef<any>(null);
+  const ref=useRef<HTMLDivElement>(null);const map=useRef<any>(null);const routeService=useRef<any>(null);const routeOverlay=useRef<any>(null);const trafficLayer=useRef<any>(null);const lastPosition=useRef<[number,number]|null>(null);
   const [all,setAll]=useState(false);const [status,setStatus]=useState('正在载入地图…');
+  const [mapReady,setMapReady]=useState(false);
   const [selected,setSelected]=useState<Place|null>(null);const [retry,setRetry]=useState(0);
   const [routeMode,setRouteMode]=useState<RouteMode>('transit');const [routeIndex,setRouteIndex]=useState(0);
-  const [routeSummary,setRouteSummary]=useState<RouteSummary|null>(null);const [routeStatus,setRouteStatus]=useState('正在准备当天路线…');
-  const [weather,setWeather]=useState<WeatherInfo|null>(null);const [traffic,setTraffic]=useState(false);
-  const [poiInfo,setPoiInfo]=useState<PoiInfo|null>(null);const [locating,setLocating]=useState(false);
+  const [routeSummary,setRouteSummary]=useState<RouteSummary|null>(null);const [routeStatus,setRouteStatus]=useState('正在准备当天路线…');const [routeCacheNote,setRouteCacheNote]=useState('');
+  const [weather,setWeather]=useState<WeatherInfo|null>(null);const [weatherCacheNote,setWeatherCacheNote]=useState('');const [traffic,setTraffic]=useState(false);
+  const [poiInfo,setPoiInfo]=useState<PoiInfo|null>(null);const [poiCacheNote,setPoiCacheNote]=useState('');const [locating,setLocating]=useState(false);const [hasPosition,setHasPosition]=useState(false);
   const current=itinerary[day-1];
   const dayKeys=[...new Set([...current.places,...current.food.map(f=>f.place)])];
   const dayShown=dayKeys.map(k=>places[k]).filter(Boolean);
@@ -98,10 +114,15 @@ export default function TripMap({day,itinerary=days,showTransit=itinerary!==days
   const routeStops=current.places.map(k=>places[k]).filter(Boolean);
   const routeFrom=routeStops[routeIndex];const routeTo=routeStops[routeIndex+1];
 
-  const planRoute=async(mode:RouteMode=routeMode,originOverride?:[number,number])=>{
+  const drawCachedRoute=(AMap:any,instance:any,cached:CachedRoute)=>{routeOverlay.current?.setMap?.(null);if(cached.path.length>1){routeOverlay.current=new AMap.Polyline({path:cached.path,strokeColor:'#4f6b45',strokeWeight:6,strokeOpacity:.82,zIndex:80});instance.add(routeOverlay.current);instance.setFitView([routeOverlay.current],false,[55,55,55,55],16)}};
+
+  const planRoute=async(mode:RouteMode=routeMode,originOverride?:[number,number],force=false)=>{
     const AMap=window.AMap,instance=map.current;if(!AMap||!instance||!routeTo)return;
     const from=originOverride??wgs84ToGcj02(routeFrom.lng,routeFrom.lat);const to=wgs84ToGcj02(routeTo.lng,routeTo.lat);
-    setRouteStatus('正在计算真实路线…');setRouteSummary(null);routeService.current?.clear?.();
+    const key=cacheKey('route',[mode,current.city,...from.map(v=>v.toFixed(5)),...to.map(v=>v.toFixed(5))].join(':'));
+    const cached=force?null:readCache<CachedRoute>(key);routeService.current?.clear?.();routeOverlay.current?.setMap?.(null);routeOverlay.current=null;
+    if(cached){drawCachedRoute(AMap,instance,cached.value);setRouteSummary(cached.value.summary);setRouteStatus('已从缓存绘制真实路线');setRouteCacheNote(`缓存于 ${cacheTime(cached.savedAt)}`);return}
+    setRouteStatus('正在计算真实路线…');setRouteSummary(null);setRouteCacheNote('');
     try{
       const plugin=mode==='transit'?'AMap.Transfer':mode==='walk'?'AMap.Walking':mode==='ride'?'AMap.Riding':'AMap.Driving';
       await loadPlugins(AMap,[plugin]);
@@ -116,32 +137,39 @@ export default function TripMap({day,itinerary=days,showTransit=itinerary!==days
         if(!item){setRouteStatus('当前方式暂无可用路线');return}
         const segments=item.segments??[];const transitNames=segments.flatMap((segment:any)=>segment.transit?.lines?.map((line:any)=>line.name)||[]).filter(Boolean);
         const detail=mode==='transit'?(transitNames.slice(0,3).join(' → ')||'公交换乘方案'):`沿实际道路规划`;
-        setRouteSummary({distance:formatDistance(Number(item.distance||0)),duration:formatDuration(Number(item.time||item.duration||0)),detail});
+        const summary={distance:formatDistance(Number(item.distance||0)),duration:formatDuration(Number(item.time||item.duration||0)),detail};
+        writeCache(key,{summary,path:routePath(item)});setRouteSummary(summary);setRouteCacheNote(`刚刚刷新并缓存`);
         setRouteStatus('已绘制真实路线');
       });
     }catch{setRouteStatus('路线服务暂时不可用，请稍后重试')}
   };
 
-  const loadWeather=async(AMap:any)=>{
-    try{await loadPlugins(AMap,['AMap.Weather']);const service=new AMap.Weather();const city=current.city==='太原'?'太原市':current.city==='成都'?'成都市':'银川市';
-      service.getLive(city,(error:any,live:any)=>{if(error)return;service.getForecast(city,(_forecastError:any,data:any)=>{const tomorrow=data?.forecasts?.[1];setWeather({weather:live.weather,temperature:String(live.temperature),wind:`${live.windDirection||''}风 ${live.windPower||''}级`.trim(),forecast:tomorrow?`明日 ${tomorrow.dayWeather} ${tomorrow.nightTemp}–${tomorrow.dayTemp}℃`:'暂无明日预报'})})});
+  const loadWeather=async(AMap:any,force=false)=>{
+    const city=current.city==='太原'?'太原市':current.city==='成都'?'成都市':'银川市';const key=cacheKey('weather',city);const cached=force?null:readCache<WeatherInfo>(key);
+    if(cached){setWeather(cached.value);setWeatherCacheNote(`缓存于 ${cacheTime(cached.savedAt)}`);return}
+    setWeather(null);setWeatherCacheNote('正在刷新…');
+    try{await loadPlugins(AMap,['AMap.Weather']);const service=new AMap.Weather();
+      service.getLive(city,(error:any,live:any)=>{if(error){setWeatherCacheNote('天气刷新失败');return}service.getForecast(city,(_forecastError:any,data:any)=>{const tomorrow=data?.forecasts?.[1];const value={weather:live.weather,temperature:String(live.temperature),wind:`${live.windDirection||''}风 ${live.windPower||''}级`.trim(),forecast:tomorrow?`明日 ${tomorrow.dayWeather} ${tomorrow.nightTemp}–${tomorrow.dayTemp}℃`:'暂无明日预报'};writeCache(key,value);setWeather(value);setWeatherCacheNote('刚刚刷新并缓存')})});
     }catch{setWeather(null)}
   };
 
-  const toggleTraffic=()=>{const AMap=window.AMap;if(!AMap||!map.current)return;if(!trafficLayer.current){trafficLayer.current=new AMap.TileLayer.Traffic({zIndex:10,autoRefresh:true,interval:180});map.current.add(trafficLayer.current)}else traffic?trafficLayer.current.hide():trafficLayer.current.show();setTraffic(!traffic)};
+  const toggleTraffic=()=>{const AMap=window.AMap;if(!AMap||!map.current)return;if(!trafficLayer.current){trafficLayer.current=new AMap.TileLayer.Traffic({zIndex:10,autoRefresh:false});map.current.add(trafficLayer.current)}else traffic?trafficLayer.current.hide():trafficLayer.current.show();setTraffic(!traffic)};
 
-  const locateAndRoute=async()=>{const AMap=window.AMap;if(!AMap||!map.current||!routeTo)return;setLocating(true);
-    try{await loadPlugins(AMap,['AMap.Geolocation']);const geolocation=new AMap.Geolocation({enableHighAccuracy:true,timeout:10000});geolocation.getCurrentPosition((resultStatus:string,result:any)=>{setLocating(false);if(resultStatus!=='complete'){setRouteStatus('无法取得当前位置，请检查浏览器定位权限');return}const p:[number,number]=[result.position.lng,result.position.lat];map.current.add(new AMap.Marker({position:p,title:'我的位置'}));planRoute(routeMode,p)})}catch{setLocating(false);setRouteStatus('定位服务暂时不可用')}};
+  const locateAndRoute=async(force=false)=>{const AMap=window.AMap;if(!AMap||!map.current||!routeTo)return;
+    if(lastPosition.current&&!force){map.current.add(new AMap.Marker({position:lastPosition.current,title:'我的位置'}));planRoute(routeMode,lastPosition.current);setRouteStatus('已使用本次访问缓存的位置');return}
+    setLocating(true);try{await loadPlugins(AMap,['AMap.Geolocation']);const geolocation=new AMap.Geolocation({enableHighAccuracy:true,timeout:10000});geolocation.getCurrentPosition((resultStatus:string,result:any)=>{setLocating(false);if(resultStatus!=='complete'){setRouteStatus('无法取得当前位置，请检查浏览器定位权限');return}const p:[number,number]=[result.position.lng,result.position.lat];lastPosition.current=p;setHasPosition(true);map.current.add(new AMap.Marker({position:p,title:'我的位置'}));planRoute(routeMode,p)})}catch{setLocating(false);setRouteStatus('定位服务暂时不可用')}};
 
-  const loadPoiInfo=async(place:Place)=>{setSelected(place);setPoiInfo(null);const AMap=window.AMap;if(!AMap)return;
-    try{await loadPlugins(AMap,['AMap.PlaceSearch']);const search=new AMap.PlaceSearch({city:place.city??(current.city==='太原'?'太原':'银川'),citylimit:true,extensions:'all',pageSize:5});search.search(place.name.replace(/（.*?）/g,''),(resultStatus:string,result:any)=>{if(resultStatus!=='complete')return;const poi=result.poiList?.pois?.[0];if(poi)setPoiInfo({address:poi.address,tel:Array.isArray(poi.tel)?poi.tel.join('、'):poi.tel,type:poi.type})})}catch{setPoiInfo(null)}};
+  const loadPoiInfo=async(place:Place,force=false)=>{setSelected(place);setPoiInfo(null);setPoiCacheNote('');const AMap=window.AMap;if(!AMap)return;
+    const city=place.city??(current.city==='太原'?'太原':'银川');const key=cacheKey('poi',`${city}:${place.name}`);const cached=force?null:readCache<PoiInfo>(key);
+    if(cached){setPoiInfo(cached.value);setPoiCacheNote(`缓存于 ${cacheTime(cached.savedAt)}`);return}
+    setPoiCacheNote('正在刷新…');try{await loadPlugins(AMap,['AMap.PlaceSearch']);const search=new AMap.PlaceSearch({city,citylimit:true,extensions:'all',pageSize:5});search.search(place.name.replace(/（.*?）/g,''),(resultStatus:string,result:any)=>{if(resultStatus!=='complete'){setPoiCacheNote('地点信息刷新失败');return}const poi=result.poiList?.pois?.[0];if(poi){const value={address:poi.address,tel:Array.isArray(poi.tel)?poi.tel.join('、'):poi.tel,type:poi.type};writeCache(key,value);setPoiInfo(value);setPoiCacheNote('刚刚刷新并缓存')}})}catch{setPoiInfo(null);setPoiCacheNote('地点信息刷新失败')}};
 
   useEffect(()=>{
-    let alive=true;let instance:any;setStatus('正在载入地图…');setSelected(null);setWeather(null);setRouteSummary(null);setRouteIndex(0);setRouteStatus('正在准备当天路线…');
+    let alive=true;let instance:any;setMapReady(false);setStatus('正在载入地图…');setSelected(null);setPoiCacheNote('');setWeather(null);setWeatherCacheNote('');setRouteSummary(null);setRouteCacheNote('');setRouteIndex(0);setRouteStatus('正在准备当天路线…');
     getAmap().then(async AMap=>{
       if(!alive||!ref.current)return;
       instance=new AMap.Map(ref.current,{zoom:11,center:[106.25,38.48],viewMode:'2D',scrollWheel:false,mapStyle:'amap://styles/normal'});map.current=instance;
-      instance.on('complete',()=>alive&&setStatus('高德地图 · 可拖动缩放'));
+      instance.on('complete',()=>{if(alive){setStatus('高德地图 · 可拖动缩放');setMapReady(true)}});
       const pts=shown.map(p=>wgs84ToGcj02(p.lng,p.lat));
       let attractionNumber=0;
       shown.forEach(p=>{
@@ -152,17 +180,17 @@ export default function TripMap({day,itinerary=days,showTransit=itinerary!==days
         const markerClass=p.kind==='restaurant'?(' restaurant-pin'+(p.alternate?' alternate-pin':'')):p.kind==='hotel'?' hotel-pin':'';
         const content=document.createElement('button');content.className='trip-pin';content.type='button';content.title=p.name;content.setAttribute('aria-label',p.name);content.innerHTML='<span class="'+markerClass.trim()+'">'+markerText+'</span>';
         const marker=new AMap.Marker({position,content,offset:new AMap.Pixel(-15,-15),title:p.name,zIndex:p.kind?120:100});
-        marker.on('click',()=>setSelected(p));instance.add(marker);
+        marker.on('click',()=>loadPoiInfo(p));instance.add(marker);
       });
       const routePts=current.places.map(k=>places[k]).filter(Boolean).map(p=>wgs84ToGcj02(p.lng,p.lat));
       if(routePts.length>1&&all)instance.add(new AMap.Polyline({path:routePts,strokeColor:'#657951',strokeWeight:2,strokeStyle:'dashed',strokeOpacity:.7,zIndex:60}));
       if(pts.length)instance.setFitView(null,false,[45,45,45,45],13);
       await loadPlugins(AMap,['AMap.Scale','AMap.ToolBar']);if(!alive)return;instance.addControl(new AMap.Scale());instance.addControl(new AMap.ToolBar({position:{right:'10px',top:'10px'}}));loadWeather(AMap);
     }).catch(()=>{if(alive)setStatus('地图加载失败，请重试或打开地点搜索')});
-    return()=>{alive=false;routeService.current?.clear?.();routeService.current=null;trafficLayer.current=null;instance?.destroy();map.current=null};
+    return()=>{alive=false;routeService.current?.clear?.();routeService.current=null;routeOverlay.current?.setMap?.(null);routeOverlay.current=null;trafficLayer.current=null;instance?.destroy();map.current=null};
   },[day,all,retry,itinerary]);
 
-  useEffect(()=>{if(map.current&&routeTo&&!all)planRoute(routeMode)},[routeMode,routeIndex,status,all]);
+  useEffect(()=>{if(mapReady&&map.current&&routeTo&&!all)planRoute(routeMode)},[routeMode,routeIndex,mapReady,all]);
 
   return <>
     {current.food.length>0&&<section className="food-plan" aria-label="当天餐饮计划">
@@ -177,20 +205,20 @@ export default function TripMap({day,itinerary=days,showTransit=itinerary!==days
       <p className="fine">线路按当前公开信息整理。国庆专线、末班时间和临时调度请前一天用高德、太原公交或银川智行复核。</p>
     </section>}
     <section className="travel-tools" aria-label="实时旅途工具">
-      <div className="weather-card"><strong>{current.city==='返程'?'银川':current.city}天气</strong>{weather?<><span>{weather.weather} · {weather.temperature}℃</span><small>{weather.wind}　{weather.forecast}</small></>:<small>正在获取实时天气…</small>}</div>
-      <div className="live-tools"><button className={traffic?'active':''} onClick={toggleTraffic}>{traffic?'关闭':'显示'}实时路况</button><button onClick={locateAndRoute} disabled={locating}>{locating?'正在定位…':'从我当前位置出发'}</button></div>
+      <div className="weather-card"><strong>{current.city==='返程'?'银川':current.city}天气</strong>{weather?<><span>{weather.weather} · {weather.temperature}℃</span><small>{weather.wind}　{weather.forecast} · {weatherCacheNote}</small></>:<small>{weatherCacheNote||'正在获取实时天气…'}</small>}<button className="inline-refresh" onClick={()=>loadWeather(window.AMap,true)}>刷新天气</button></div>
+      <div className="live-tools"><button className={traffic?'active':''} onClick={toggleTraffic}>{traffic?'关闭':'显示'}实时路况</button>{traffic&&<button onClick={()=>trafficLayer.current?.reload?.()}>刷新路况</button>}<button onClick={()=>locateAndRoute(false)} disabled={locating}>{locating?'正在定位…':'从我当前位置出发'}</button>{hasPosition&&<button onClick={()=>locateAndRoute(true)} disabled={locating}>刷新定位</button>}</div>
     </section>
     {!all&&routeFrom&&routeTo&&<section className="route-planner" aria-label="真实路线规划">
       <div className="route-select"><label>路线段<select value={routeIndex} onChange={e=>setRouteIndex(Number(e.target.value))}>{routeStops.slice(0,-1).map((p,i)=><option value={i} key={p.name}>{p.name} → {routeStops[i+1].name}</option>)}</select></label></div>
       <div className="route-modes">{([['transit','公交 / 地铁'],['walk','步行'],['ride','骑行'],['drive','驾车 / 网约车']] as [RouteMode,string][]).map(([mode,label])=><button className={routeMode===mode?'active':''} onClick={()=>setRouteMode(mode)} key={mode}>{label}</button>)}</div>
-      <div className="route-result"><strong>{routeStatus}</strong>{routeSummary&&<p>{routeSummary.duration} · {routeSummary.distance}<span>{routeSummary.detail}</span></p>}</div>
+      <div className="route-result"><div><strong>{routeStatus}</strong>{routeCacheNote&&<small>{routeCacheNote}</small>}</div>{routeSummary&&<p>{routeSummary.duration} · {routeSummary.distance}<span>{routeSummary.detail}</span></p>}<button className="inline-refresh" onClick={()=>planRoute(routeMode,undefined,true)}>刷新路线</button></div>
     </section>}
     <div className="map-actions"><span role="status">{status}</span><button onClick={()=>setAll(!all)}>{all?'只看当天':'查看全程'} ↗</button></div>
     <div className="map" ref={ref} aria-label={'第'+day+'天地点与餐馆交互地图'}/>
     {status.includes('失败')&&<button className="map-retry" onClick={()=>{window.__amapReady=undefined;setRetry(retry+1)}}>重新加载地图</button>}
     <p className="map-caption"><span className="legend-attraction">1</span> 景点 / 活动点　<span className="legend-hotel">🛏</span> 酒店　<span className="legend-food">🍴</span> 餐馆　<span className="legend-alt">🍴</span> 同类备选</p>
     <div className="map-places">{shown.map((p,i)=><button key={p.name} className={(selected?.name===p.name?'selected ':'')+(p.kind==='restaurant'?'restaurant-place ':'')+(p.kind==='hotel'?'hotel-place ':'')+(p.alternate?'alternate-place':'')} onClick={()=>{loadPoiInfo(p);map.current?.setZoomAndCenter(14,wgs84ToGcj02(p.lng,p.lat),true)}}><b>{p.kind==='restaurant'?'餐':p.kind==='hotel'?'住':shown.slice(0,i+1).filter(item=>!item.kind).length}</b>{p.name}</button>)}</div>
-    {selected&&<div className="place-detail"><strong>{selected.name}</strong><p>{selected.note}</p>{poiInfo?.address&&<p>高德地址：{poiInfo.address}</p>}{poiInfo?.tel&&<p>电话：{poiInfo.tel}</p>}{showTransit&&selected.travel&&<p className="place-transit"><BusFront/> {selected.travel}</p>}<p>{selected.lat.toFixed(5)}° N, {selected.lng.toFixed(5)}° E · WGS84</p><a href={selected.source} target="_blank" rel="noreferrer">查看位置来源 ↗</a><a href={'https://uri.amap.com/navigation?to='+wgs84ToGcj02(selected.lng,selected.lat).join(',')+','+encodeURIComponent(selected.name)+'&mode=car&policy=1&callnative=1&src=yinchuan-trip'} target="_blank" rel="noreferrer">从当前位置导航 ↗</a></div>}
+    {selected&&<div className="place-detail"><strong>{selected.name}</strong><button className="inline-refresh" onClick={()=>loadPoiInfo(selected,true)}>刷新地点信息</button>{poiCacheNote&&<small className="cache-note">{poiCacheNote}</small>}<p>{selected.note}</p>{poiInfo?.address&&<p>高德地址：{poiInfo.address}</p>}{poiInfo?.tel&&<p>电话：{poiInfo.tel}</p>}{showTransit&&selected.travel&&<p className="place-transit"><BusFront/> {selected.travel}</p>}<p>{selected.lat.toFixed(5)}° N, {selected.lng.toFixed(5)}° E · WGS84</p><a href={selected.source} target="_blank" rel="noreferrer">查看位置来源 ↗</a><a href={'https://uri.amap.com/navigation?to='+wgs84ToGcj02(selected.lng,selected.lat).join(',')+','+encodeURIComponent(selected.name)+'&mode=car&policy=1&callnative=1&src=yinchuan-trip'} target="_blank" rel="noreferrer">从当前位置导航 ↗</a></div>}
     <p className="fine">餐馆按当天动线穿插；同类型备选不会重复占用餐次。地址参考点及分店信息请在出发前通过高德确认。</p>
   </>;
 }
