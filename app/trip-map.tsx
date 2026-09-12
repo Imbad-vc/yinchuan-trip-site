@@ -9,6 +9,8 @@ const places:Record<string,Place>={
   taiyuanBase:{name:'锦江之星风尚太原大南门地铁站酒店',lat:37.859588,lng:112.552636,note:'迎泽大街221号，迎泽大街与解放路交叉口西北角；高德坐标已换算为WGS84参考点',source:'https://www.amap.com/place/B0FFHH8065',travel:'酒店紧邻地铁“大南门站”H口，1号线与2号线换乘；去钟楼街、迎泽公园可步行，远途景点优先地铁接公交。',kind:'hotel',city:'太原'},
   taiyuanSouth:{name:'太原南站',lat:37.7896,lng:112.6105,note:'D1910抵达站；与太原站不是同一座车站',source:'https://uri.amap.com/search?keyword=太原南站&city=太原&callnative=0',travel:'乘地铁1号线从“太原南站”直达“大南门站”，H口出站即到酒店；携带大件行李时再考虑网约车。',city:'太原'},
   taiyuanStation:{name:'太原站',lat:37.8602,lng:112.5905,note:'D267 夜车由太原站出发；不要误去太原南站',source:'https://uri.amap.com/search?keyword=太原站&city=太原&callnative=0',travel:'从酒店旁“大南门站”乘地铁1号线到“太原站东广场”；夜车至少提前45分钟离开酒店。',city:'太原'},
+  yinchuanStationCombined:{name:'银川站',lat:38.49168,lng:106.16862,note:'D267抵达、D1709返程车站；打车或乘公交时确认进出站口',source:'https://mapcarta.com/N9118892109',travel:'银川无地铁；前往金凤万达酒店优先查询公交换乘，夜车抵达后若班次等待较长或携带大件行李则直接网约车。',city:'银川'},
+  yinchuanHotel:{name:'银川万达嘉利家公寓酒店（万达店）',lat:38.486023,lng:106.244835,note:'正源北街金凤万达广场B座923；10/4入住、10/7退房，三晚',source:'https://www.kkvip.hk/Aitravel/caringchat?hid_cn=1130350&lat=38.486022997917&lon=106.24483474794',travel:'银川无地铁。酒店位于金凤万达，去宁夏博物馆约2公里，优先公交或共享单车；携带行李、清晨抵达及郊区行程再使用网约车。',kind:'hotel',city:'银川'},
   jinci:{name:'晋祠博物馆',lat:37.7066,lng:112.4475,note:'景区参考点；入口与国庆开放时间出发前复核',source:'https://uri.amap.com/search?keyword=晋祠博物馆&city=太原&callnative=0',travel:'地铁1号线至“五一广场”附近换308路，或在青年路口乘804路，到“晋祠公园”后步行；约75–90分钟。',city:'太原'},
   shanxiMuseum:{name:'山西博物院',lat:37.8656,lng:112.5205,note:'滨河西路馆区参考点；提前预约',source:'https://uri.amap.com/search?keyword=山西博物院&city=太原&callnative=0',travel:'地铁1号线到“太原理工大学站”，再换旅游公交专线1一站到“山西博物院”；不顺班次时换69/865路。',city:'太原'},
   bellStreet:{name:'太原钟楼街',lat:37.8707,lng:112.5624,note:'老城步行街参考点，可与食品街一起散步',source:'https://uri.amap.com/search?keyword=太原钟楼街&city=太原&callnative=0',travel:'地铁1号线“柳南站”下车后步行约10–15分钟；老城内继续步行，不建议叫车。',area:true,city:'太原'},
@@ -39,17 +41,35 @@ const places:Record<string,Place>={
   baicao:{name:'百草滩羊清水涮羊肉（长城路店）',lat:38.4507,lng:106.2495,note:'长城路与庆祥街交叉口附近（庆祥街127号）· 2026必吃榜，坐标为地址参考点',source:'https://uri.amap.com/search?keyword=银川百草滩羊清水涮羊肉长城路店&city=银川&callnative=0',kind:'restaurant'}
 };
 
-declare global{interface Window{L:any;__leafletReady?:Promise<any>}}
-function getLeaflet(){
-  if(window.L)return Promise.resolve(window.L);
-  if(!window.__leafletReady)window.__leafletReady=new Promise((resolve,reject)=>{
-    const s=document.createElement('script');s.src='/vendor/leaflet.js';
-    const timeout=setTimeout(()=>reject(Error('timeout')),12000);
-    s.onload=()=>{clearTimeout(timeout);resolve(window.L)};
+declare global{interface Window{AMap:any;_AMapSecurityConfig?:{securityJsCode:string};__amapReady?:Promise<any>}}
+const amapKey=process.env.NEXT_PUBLIC_AMAP_KEY??'';
+const amapSecurityCode=process.env.NEXT_PUBLIC_AMAP_SECURITY_CODE??'';
+
+function getAmap(){
+  if(window.AMap)return Promise.resolve(window.AMap);
+  if(!amapKey||!amapSecurityCode)return Promise.reject(Error('missing-key'));
+  window._AMapSecurityConfig={securityJsCode:amapSecurityCode};
+  if(!window.__amapReady)window.__amapReady=new Promise((resolve,reject)=>{
+    const s=document.createElement('script');
+    s.src=`https://webapi.amap.com/maps?v=2.0&key=${encodeURIComponent(amapKey)}&plugin=AMap.Scale`;
+    const timeout=setTimeout(()=>reject(Error('timeout')),15000);
+    s.onload=()=>{clearTimeout(timeout);window.AMap?resolve(window.AMap):reject(Error('load'))};
     s.onerror=()=>{clearTimeout(timeout);reject(Error('load'))};
     document.head.appendChild(s);
   });
-  return window.__leafletReady;
+  return window.__amapReady;
+}
+
+function wgs84ToGcj02(lng:number,lat:number):[number,number]{
+  if(lng<72.004||lng>137.8347||lat<0.8293||lat>55.8271)return[lng,lat];
+  const pi=Math.PI,a=6378245,ee=0.006693421622965943;
+  const transformLat=(x:number,y:number)=>-100+2*x+3*y+.2*y*y+.1*x*y+.2*Math.sqrt(Math.abs(x))+(20*Math.sin(6*x*pi)+20*Math.sin(2*x*pi))*2/3+(20*Math.sin(y*pi)+40*Math.sin(y*pi/3))*2/3+(160*Math.sin(y*pi/12)+320*Math.sin(y*pi/30))*2/3;
+  const transformLng=(x:number,y:number)=>300+x+2*y+.1*x*x+.1*x*y+.1*Math.sqrt(Math.abs(x))+(20*Math.sin(6*x*pi)+20*Math.sin(2*x*pi))*2/3+(20*Math.sin(x*pi)+40*Math.sin(x*pi/3))*2/3+(150*Math.sin(x*pi/12)+300*Math.sin(x*pi/30))*2/3;
+  let dLat=transformLat(lng-105,lat-35),dLng=transformLng(lng-105,lat-35);
+  const radLat=lat/180*pi,magic=1-ee*Math.sin(radLat)**2,sqrtMagic=Math.sqrt(magic);
+  dLat=dLat*180/((a*(1-ee))/(magic*sqrtMagic)*pi);
+  dLng=dLng*180/(a/sqrtMagic*Math.cos(radLat)*pi);
+  return[lng+dLng,lat+dLat];
 }
 
 export default function TripMap({day,itinerary=days,showTransit=itinerary!==days}:{day:number;itinerary?:TripDay[];showTransit?:boolean}){
@@ -59,34 +79,34 @@ export default function TripMap({day,itinerary=days,showTransit=itinerary!==days
   const current=itinerary[day-1];
   const dayKeys=[...new Set([...current.places,...current.food.map(f=>f.place)])];
   const dayShown=dayKeys.map(k=>places[k]).filter(Boolean);
-  const keys=all?Object.keys(places):dayKeys;
+  const itineraryKeys=[...new Set(itinerary.flatMap(d=>[...d.places,...d.food.map(f=>f.place)]))];
+  const keys=all?itineraryKeys:dayKeys;
   const shown=keys.map(k=>places[k]).filter(Boolean);
 
   useEffect(()=>{
     let alive=true;let instance:any;setStatus('正在载入地图…');setSelected(null);
-    getLeaflet().then(L=>{
+    getAmap().then(AMap=>{
       if(!alive||!ref.current)return;
-      instance=L.map(ref.current,{scrollWheelZoom:false,attributionControl:true});map.current=instance;
-      const tiles=L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors'}).addTo(instance);
-      let errors=0;tiles.on('tileerror',()=>{errors++;if(alive&&errors>2)setStatus('底图暂时不可用，可通过地点搜索查看')});tiles.on('load',()=>{if(alive&&!errors)setStatus('在线底图 · 可拖动缩放')});
-      const pts=shown.map(p=>[p.lat,p.lng]);
+      instance=new AMap.Map(ref.current,{zoom:11,center:[106.25,38.48],viewMode:'2D',scrollWheel:false,mapStyle:'amap://styles/normal'});map.current=instance;
+      instance.on('complete',()=>alive&&setStatus('高德地图 · 可拖动缩放'));
+      const pts=shown.map(p=>wgs84ToGcj02(p.lng,p.lat));
       let attractionNumber=0;
       shown.forEach(p=>{
-        if(p.area)L.circle([p.lat,p.lng],{radius:p.name.includes('美术馆')?250:850,color:p.kind?'#b76b42':'#8b9779',weight:1,dashArray:'4 4',fillOpacity:.12}).addTo(instance);
+        const position=wgs84ToGcj02(p.lng,p.lat);
+        if(p.area)instance.add(new AMap.Circle({center:position,radius:p.name.includes('美术馆')?250:850,strokeColor:p.kind?'#b76b42':'#8b9779',strokeWeight:1,strokeStyle:'dashed',fillColor:'#8b9779',fillOpacity:.12}));
         if(!p.kind)attractionNumber++;
         const markerText=p.kind==='restaurant'?'🍴':p.kind==='hotel'?'🛏':String(attractionNumber);
         const markerClass=p.kind==='restaurant'?(' restaurant-pin'+(p.alternate?' alternate-pin':'')):p.kind==='hotel'?' hotel-pin':'';
-        const icon=L.divIcon({className:'trip-pin',html:'<span class="'+markerClass.trim()+'">'+markerText+'</span>',iconSize:[31,31],iconAnchor:[15,15]});
-        const marker=L.marker([p.lat,p.lng],{icon,title:p.name,keyboard:true}).addTo(instance);
-        const label=document.createElement('div');label.textContent=p.name;
-        marker.bindTooltip(label,{direction:'top',offset:[0,-15]}).on('click',()=>setSelected(p));
+        const content=document.createElement('button');content.className='trip-pin';content.type='button';content.title=p.name;content.setAttribute('aria-label',p.name);content.innerHTML='<span class="'+markerClass.trim()+'">'+markerText+'</span>';
+        const marker=new AMap.Marker({position,content,offset:new AMap.Pixel(-15,-15),title:p.name,zIndex:p.kind?120:100});
+        marker.on('click',()=>setSelected(p));instance.add(marker);
       });
-      const routePts=current.places.map(k=>places[k]).filter(Boolean).map(p=>[p.lat,p.lng]);
-      if(routePts.length>1&&!all)L.polyline(routePts,{color:'#657951',weight:2,dashArray:'6 8',opacity:.7,interactive:false}).addTo(instance);
-      if(pts.length)instance.fitBounds(L.latLngBounds(pts),{padding:[45,45],maxZoom:13});else instance.setView([38.48,106.25],11);
-      L.control.scale({imperial:false}).addTo(instance);
+      const routePts=current.places.map(k=>places[k]).filter(Boolean).map(p=>wgs84ToGcj02(p.lng,p.lat));
+      if(routePts.length>1&&!all)instance.add(new AMap.Polyline({path:routePts,strokeColor:'#657951',strokeWeight:2,strokeStyle:'dashed',strokeOpacity:.7,zIndex:60}));
+      if(pts.length)instance.setFitView(null,false,[45,45,45,45],13);
+      instance.addControl(new AMap.Scale());
     }).catch(()=>{if(alive)setStatus('地图加载失败，请重试或打开地点搜索')});
-    return()=>{alive=false;instance?.remove();map.current=null};
+    return()=>{alive=false;instance?.destroy();map.current=null};
   },[day,all,retry,itinerary]);
 
   return <>
@@ -103,9 +123,9 @@ export default function TripMap({day,itinerary=days,showTransit=itinerary!==days
     </section>}
     <div className="map-actions"><span role="status">{status}</span><button onClick={()=>setAll(!all)}>{all?'只看当天':'查看全程'} ↗</button></div>
     <div className="map" ref={ref} aria-label={'第'+day+'天地点与餐馆交互地图'}/>
-    {status.includes('失败')&&<button className="map-retry" onClick={()=>{window.__leafletReady=undefined;setRetry(retry+1)}}>重新加载地图</button>}
+    {status.includes('失败')&&<button className="map-retry" onClick={()=>{window.__amapReady=undefined;setRetry(retry+1)}}>重新加载地图</button>}
     <p className="map-caption"><span className="legend-attraction">1</span> 景点 / 活动点　<span className="legend-hotel">🛏</span> 酒店　<span className="legend-food">🍴</span> 餐馆　<span className="legend-alt">🍴</span> 同类备选</p>
-    <div className="map-places">{shown.map((p,i)=><button key={p.name} className={(selected?.name===p.name?'selected ':'')+(p.kind==='restaurant'?'restaurant-place ':'')+(p.kind==='hotel'?'hotel-place ':'')+(p.alternate?'alternate-place':'')} onClick={()=>{setSelected(p);map.current?.flyTo([p.lat,p.lng],14,{duration:.6})}}><b>{p.kind==='restaurant'?'餐':p.kind==='hotel'?'住':shown.slice(0,i+1).filter(item=>!item.kind).length}</b>{p.name}</button>)}</div>
+    <div className="map-places">{shown.map((p,i)=><button key={p.name} className={(selected?.name===p.name?'selected ':'')+(p.kind==='restaurant'?'restaurant-place ':'')+(p.kind==='hotel'?'hotel-place ':'')+(p.alternate?'alternate-place':'')} onClick={()=>{setSelected(p);map.current?.setZoomAndCenter(14,wgs84ToGcj02(p.lng,p.lat),true)}}><b>{p.kind==='restaurant'?'餐':p.kind==='hotel'?'住':shown.slice(0,i+1).filter(item=>!item.kind).length}</b>{p.name}</button>)}</div>
     {selected&&<div className="place-detail"><strong>{selected.name}</strong><p>{selected.note}</p>{showTransit&&selected.travel&&<p className="place-transit"><BusFront/> {selected.travel}</p>}<p>{selected.lat.toFixed(5)}° N, {selected.lng.toFixed(5)}° E · WGS84</p><a href={selected.source} target="_blank" rel="noreferrer">查看位置来源 ↗</a><a href={'https://uri.amap.com/search?keyword='+encodeURIComponent((selected.city??'银川')+' '+selected.name.replace('（待复核）',''))+'&city='+(selected.city??'银川')+'&callnative=0'} target="_blank" rel="noreferrer">高德搜索 / 导航 ↗</a></div>}
     <p className="fine">餐馆按当天动线穿插；同类型备选不会重复占用餐次。地址参考点及分店信息请在出发前通过高德确认。</p>
   </>;

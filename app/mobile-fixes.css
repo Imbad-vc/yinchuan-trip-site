@@ -145,6 +145,13 @@
 .map-places .restaurant-place b { background: #b66740; }
 .map-places .hotel-place b { color: #fff; background: #496c7a; }
 .map-places .alternate-place b { color: #9a5a3b; background: transparent; border: 1px dashed #b66740; }
+.silver-hotel { margin-top: 24px; }
+
+.map .amap-layer { filter: saturate(.55); }
+.trip-pin { width: 31px; height: 31px; padding: 0; border: 0; background: transparent; }
+.amap-logo, .amap-copyright { font-size: 10px !important; }
+.live-dot { font-size: 0; }
+.live-dot::after { content: '高德地图'; font-size: 12px; }
 
 @media (max-width: 700px) {
   .food-plan { padding: 14px; }
